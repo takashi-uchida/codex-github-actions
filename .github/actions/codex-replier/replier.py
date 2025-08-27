@@ -73,7 +73,49 @@ def call_openai(prompt: str, model: str, openai_key: str) -> str:
         print(f"::error title=Codex Replier::OpenAI call failed: {exc}")
         sys.exit(1)
     print("::endgroup::")
-    return extract_reply_text(resp_json)
+    # If API returned an error, surface it
+    if isinstance(resp_json, dict) and resp_json.get('error'):
+        err = resp_json['error']
+        msg = err.get('message') or str(err)
+        return f"(OpenAI error) {msg}"
+    text = extract_reply_text(resp_json)
+    if text and text.strip() and text.strip() != "(No text response received from the model.)":
+        return text
+    # Fallback: try Chat Completions for broader compatibility
+    chat_payload = {
+        "model": model,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7,
+    }
+    chat_req = urllib.request.Request(
+        'https://api.openai.com/v1/chat/completions',
+        data=json.dumps(chat_payload).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {openai_key}',
+            'User-Agent': 'codex-replier-action/1.0',
+        },
+        method='POST',
+    )
+    print("::group::Calling OpenAI (chat.fallback)")
+    try:
+        with urllib.request.urlopen(chat_req, timeout=120) as resp:
+            body = resp.read().decode('utf-8', errors='replace')
+            chat_json = json.loads(body)
+    except Exception as exc:
+        print("::endgroup::")
+        print(f"::notice title=Codex Replier::Chat fallback failed: {exc}")
+        return "(No text response received from the model.)"
+    print("::endgroup::")
+    if isinstance(chat_json, dict) and chat_json.get('error'):
+        msg = chat_json['error'].get('message') or str(chat_json['error'])
+        return f"(OpenAI error) {msg}"
+    try:
+        return (chat_json.get('choices') or [{}])[0].get('message', {}).get('content', '').strip() or "(No text response received from the model.)"
+    except Exception:
+        return "(No text response received from the model.)"
 
 
 def shquote(s: str) -> str:
@@ -81,6 +123,9 @@ def shquote(s: str) -> str:
 
 
 def try_cli(prompt: str, model: str) -> Optional[str]:
+    if (os.environ.get('CODEX_CLI_DISABLE', '').lower() in ('1','true','yes','on')):
+        print("::notice title=Codex Replier::CLI disabled by CODEX_CLI_DISABLE")
+        return None
     # Allow explicit override via CODEX_CLI_TEMPLATE
     override = os.environ.get('CODEX_CLI_TEMPLATE')
     templates = []
@@ -89,9 +134,12 @@ def try_cli(prompt: str, model: str) -> Optional[str]:
     else:
         # Try several common patterns; prompt is positional
         templates = [
+            # Prefer piping prompt via stdin to avoid TTY-related errors
+            "printf %s {prompt} | npx -y @openai/codex@latest -- --model {model}",
+            "printf %s {prompt} | npx -y @openai/codex@latest -- -m {model}",
+            # Positional prompt as fallback
             "npx -y @openai/codex@latest -- --model {model} {prompt}",
             "npx -y @openai/codex@latest -- -m {model} {prompt}",
-            "npx -y @openai/codex@latest -- --model={model} {prompt}",
             # As a last resort, let default model be used
             "npx -y @openai/codex@latest -- {prompt}",
         ]

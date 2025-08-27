@@ -60,10 +60,13 @@ jobs:
 ### CLI フォールバックのテンプレート（任意）
 
 - 既定の実行コマンドは以下の順で試行します（`--` により npx に解釈させない）。
-  1. `npx -y @openai/codex@latest -- --model {model} {prompt}`
-  2. `npx -y @openai/codex@latest -- -m {model} {prompt}`
-  3. `npx -y @openai/codex@latest -- --model={model} {prompt}`
-  4. `npx -y @openai/codex@latest -- {prompt}`（モデル未指定・CLIデフォルト使用）
+  1. `printf %s {prompt} | npx -y @openai/codex@latest -- --model {model}`
+  2. `printf %s {prompt} | npx -y @openai/codex@latest -- -m {model}`
+  3. `npx -y @openai/codex@latest -- --model {model} {prompt}`
+  4. `npx -y @openai/codex@latest -- -m {model} {prompt}`
+  5. `npx -y @openai/codex@latest -- {prompt}`（モデル未指定・CLIデフォルト使用）
+
+- CLIを無効化したい場合は `CODEX_CLI_DISABLE=true` を設定してください（API直呼びのみ）。
 - カスタムしたい場合は、環境変数 `CODEX_CLI_TEMPLATE` を設定してください（ジョブ全体の `env:` やリポジトリ変数でOK）。
 - テンプレート内で `{model}` と `{prompt}` が置換されます。例:
 
