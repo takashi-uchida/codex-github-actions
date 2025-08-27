@@ -55,13 +55,13 @@ jobs:
 
 ### CLI フォールバックのテンプレート（任意）
 
-- 既定の実行コマンドは `npx -y @openai/codex@latest --model {model} --input {prompt}` を試行します。
+- 既定の実行コマンドは `npx -y @openai/codex@latest -- --model {model} --input {prompt}` を試行します（npx に解釈させないため `--` を付与）。
 - カスタムしたい場合は、環境変数 `CODEX_CLI_TEMPLATE` を設定してください（ジョブ全体の `env:` やリポジトリ変数でOK）。
 - テンプレート内で `{model}` と `{prompt}` が置換されます。例:
 
 ```yaml
 env:
-  CODEX_CLI_TEMPLATE: "npx -y @openai/codex@latest --no-color --model {model} --input {prompt}"
+  CODEX_CLI_TEMPLATE: "npx -y @openai/codex@latest -- --no-color --model {model} --input {prompt}"
 ```
 
 CLI が失敗（非ゼロ終了・出力なし）の場合は自動で API にフォールバックします。

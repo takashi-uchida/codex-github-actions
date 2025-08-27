@@ -84,7 +84,8 @@ def try_cli(prompt: str, model: str) -> Optional[str]:
     # Allow override: CODEX_CLI_TEMPLATE supports {model} and {prompt}
     template = os.environ.get(
         'CODEX_CLI_TEMPLATE',
-        "npx -y @openai/codex@latest --model {model} --input {prompt}",
+        # Use `--` to ensure args are passed to the package, not npx
+        "npx -y @openai/codex@latest -- --model {model} --input {prompt}",
     )
     if not template:
         return None
