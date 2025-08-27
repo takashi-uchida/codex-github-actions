@@ -11,6 +11,26 @@ inputs:
   mention_author:
     description: "Whether to @mention the original commenter (true/false)"
     required: true
+  system_prompt:
+    description: "Optional system instructions to prepend"
+    required: false
+    default: ''
+  include_metadata:
+    description: "Include repo/issue context in the prompt"
+    required: false
+    default: 'true'
+  include_thread_context:
+    description: "Include recent thread comments in the prompt"
+    required: false
+    default: 'true'
+  max_context_chars:
+    description: "Max characters to allocate to metadata + thread context"
+    required: false
+    default: '8000'
+  max_thread_comments:
+    description: "Max recent thread comments to include"
+    required: false
+    default: '5'
 
 runs:
   using: composite
@@ -33,7 +53,11 @@ runs:
         INPUT_TRIGGER_PREFIX: ${{ inputs.trigger_prefix }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_MENTION_AUTHOR: ${{ inputs.mention_author }}
+        INPUT_SYSTEM_PROMPT: ${{ inputs.system_prompt }}
+        INPUT_INCLUDE_METADATA: ${{ inputs.include_metadata }}
+        INPUT_INCLUDE_THREAD_CONTEXT: ${{ inputs.include_thread_context }}
+        INPUT_MAX_CONTEXT_CHARS: ${{ inputs.max_context_chars }}
+        INPUT_MAX_THREAD_COMMENTS: ${{ inputs.max_thread_comments }}
       run: |
         set -euo pipefail
         python "$GITHUB_ACTION_PATH/.github/actions/codex-replier/replier.py"
-

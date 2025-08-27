@@ -57,6 +57,14 @@ jobs:
 - `model`: `o4-mini` や `gpt-4.1` など任意
 - `mention_author`: `true/false` で投稿者へのメンションの有無
 
+### プロンプト構築（コンテキスト注入）
+
+- `system_prompt`（任意）: システム指示。Responses API では本文先頭に `[System]` ブロックとして埋め込み、Chat フォールバックでは system メッセージとして使用します。
+- `include_metadata`（既定: true）: リポジトリ名、Issue/PR 番号・タイトル・URL、モデルなどのメタ情報を `[Context]` として付与。
+- `include_thread_context`（既定: true）: 直近のスレッドコメント（投稿者と本文）を `[Recent Thread]` として付与。
+- `max_context_chars`（既定: 8000）: メタ情報＋スレッド部分に割り当てる最大文字数。超過分は省略記号で切り詰め。
+- `max_thread_comments`（既定: 5）: 取り込む直近コメント数（トリガーとなったコメントは除外）。
+
 ### CLI フォールバックのテンプレート（任意）
 
 - 既定の実行コマンドは以下の順で試行します（`--` は npx のオプション終端）。現行の `@openai/codex` は `--model/-m` を受け付けないため、モデル指定は行いません（CLI 既定モデルを使用）。

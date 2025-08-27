@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 from typing import Optional
 import urllib.request
+import urllib.parse
 
 
 def e(name: str, default=None):
@@ -21,6 +22,113 @@ def load_event():
         sys.exit(0)
     with open(event_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+def boolish(v: str, default: bool = True) -> bool:
+    if v is None:
+        return default
+    return str(v).strip().lower() in ('1','true','yes','on')
+
+
+def safe_trim(text: str, limit: int) -> str:
+    if text is None:
+        return ''
+    s = str(text)
+    return s if len(s) <= limit else s[: max(0, limit - 1)] + '…'
+
+
+def fetch_thread_comments(owner: str, repo: str, number: int, gh_token: str, exclude_comment_id: Optional[int], limit: int = 5) -> list:
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments?per_page=100"
+    req = urllib.request.Request(
+        url,
+        headers={
+            'Accept': 'application/vnd.github+json',
+            'Authorization': f'Bearer {gh_token}',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'codex-replier-action/1.0',
+        },
+        method='GET',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode('utf-8', errors='replace')
+            items = json.loads(body)
+    except Exception:
+        return []
+    if not isinstance(items, list):
+        return []
+    filtered = []
+    for it in items:
+        if exclude_comment_id and it.get('id') == exclude_comment_id:
+            continue
+        filtered.append(it)
+    filtered.sort(key=lambda x: x.get('created_at') or '')
+    return filtered[-limit:]
+
+
+def build_prompt(
+    *,
+    event: dict,
+    owner: str,
+    repo_name: str,
+    number: int,
+    user_request: str,
+    model: str,
+    include_metadata: bool,
+    include_thread: bool,
+    max_context_chars: int,
+    max_thread_comments: int,
+    system_prompt: str,
+    gh_token: str,
+) -> tuple[str, Optional[str], str]:
+    # Returns (responses_input, system_for_chat, chat_user_content)
+    blocks = []
+    sys_msg = system_prompt.strip() if system_prompt else ''
+
+    if include_metadata:
+        repo_full = f"{owner}/{repo_name}" if owner and repo_name else (event.get('repository', {}).get('full_name') or '')
+        issue = event.get('issue') or {}
+        title = issue.get('title') or ''
+        html_url = issue.get('html_url') or ''
+        is_pr = bool(issue.get('pull_request'))
+        kind = 'PR' if is_pr else 'Issue'
+        meta = [
+            f"Repo: {repo_full}",
+            f"{kind}: #{number} {title}".strip(),
+        ]
+        if html_url:
+            meta.append(f"URL: {html_url}")
+        meta.append(f"Model: {model}")
+        blocks.append("[Context]\n" + "\n".join(meta))
+
+    if include_thread and gh_token and owner and repo_name and number:
+        exclude_id = (event.get('comment') or {}).get('id')
+        comments = fetch_thread_comments(owner, repo_name, number, gh_token, exclude_id, max_thread_comments)
+        if comments:
+            lines = []
+            for c in comments:
+                author = ((c.get('user') or {}).get('login') or 'unknown')
+                body = c.get('body') or ''
+                body = body.replace("\r\n", "\n").strip()
+                body = safe_trim(body, 1200)
+                lines.append(f"- {author}: {body}")
+            thread_text = "\n".join(lines)
+            blocks.append("[Recent Thread]\n" + thread_text)
+
+    blocks.append("[User Request]\n" + user_request)
+
+    user_block = blocks[-1]
+    context_blocks = blocks[:-1]
+    context_text = "\n\n".join(context_blocks) if context_blocks else ''
+    if len(context_text) > max_context_chars:
+        context_text = safe_trim(context_text, max_context_chars)
+    full_no_sys = (context_text + ("\n\n" if context_text else '') + user_block).strip()
+
+    if sys_msg:
+        responses_input = f"[System]\n{sys_msg}\n\n" + full_no_sys
+    else:
+        responses_input = full_no_sys
+    return responses_input, (sys_msg or None), full_no_sys
 
 
 def extract_reply_text(resp_json: dict) -> str:
@@ -61,7 +169,7 @@ def extract_reply_text(resp_json: dict) -> str:
     return "(No text response received from the model.)"
 
 
-def call_openai(prompt: str, model: str, openai_key: str) -> str:
+def call_openai(prompt: str, model: str, openai_key: str, system_for_chat: Optional[str] = None, chat_user_content: Optional[str] = None) -> str:
     if (os.environ.get('CODEX_DRY_RUN', '').lower() in ('1','true','yes','on')):
         return f"(dry-run) prompt: {prompt} | model: {model}"
     payload = {"model": model, "input": prompt}
@@ -113,8 +221,8 @@ def call_openai(prompt: str, model: str, openai_key: str) -> str:
     # Fallback: try Chat Completions for broader compatibility
     chat_payload = {
         "model": chat_model,
-        "messages": [
-            {"role": "user", "content": prompt}
+        "messages": ([{"role": "system", "content": system_for_chat}] if system_for_chat else []) + [
+            {"role": "user", "content": (chat_user_content if chat_user_content else prompt)}
         ],
         "temperature": 0.7,
     }
@@ -251,8 +359,9 @@ def main():
     event = load_event()
 
     action = event.get('action')
-    comment = (event.get('comment') or {}).get('body') or ''
-    commenter = ((event.get('comment') or {}).get('user') or {}).get('login') or ''
+    comment_obj = (event.get('comment') or {})
+    comment = comment_obj.get('body') or ''
+    commenter = (comment_obj.get('user') or {}).get('login') or ''
     issue = event.get('issue') or {}
 
     number = (issue.get('number')
@@ -268,7 +377,18 @@ def main():
 
     prefix = (e('INPUT_TRIGGER_PREFIX') or '/codex').strip()
     model = (e('INPUT_MODEL') or 'o4-mini').strip()
-    mention = (e('INPUT_MENTION_AUTHOR') or 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+    mention = boolish(e('INPUT_MENTION_AUTHOR') or 'true', True)
+    system_prompt = e('INPUT_SYSTEM_PROMPT') or ''
+    include_metadata = boolish(e('INPUT_INCLUDE_METADATA') or 'true', True)
+    include_thread = boolish(e('INPUT_INCLUDE_THREAD_CONTEXT') or 'true', True)
+    try:
+        max_context_chars = int(e('INPUT_MAX_CONTEXT_CHARS') or '8000')
+    except Exception:
+        max_context_chars = 8000
+    try:
+        max_thread_comments = int(e('INPUT_MAX_THREAD_COMMENTS') or '5')
+    except Exception:
+        max_thread_comments = 5
 
     if action != 'created':
         print(f"::notice title=Codex Replier::Event action '{action}' not 'created'; skipping")
@@ -278,8 +398,8 @@ def main():
         print(f"::notice title=Codex Replier::Comment does not start with prefix '{prefix}'; skipping")
         sys.exit(0)
 
-    prompt = comment.strip()[len(prefix):].lstrip()
-    if not prompt:
+    raw_request = comment.strip()[len(prefix):].lstrip()
+    if not raw_request:
         print("::warning title=Codex Replier::Empty prompt after prefix; nothing to do")
         sys.exit(0)
 
@@ -288,13 +408,29 @@ def main():
         print("::error title=Codex Replier::Missing OPENAI_API_KEY secret")
         sys.exit(1)
 
+    # Build rich prompt
+    responses_input, sys_for_chat, chat_user_content = build_prompt(
+        event=event,
+        owner=owner,
+        repo_name=repo_name,
+        number=number,
+        user_request=raw_request,
+        model=model,
+        include_metadata=include_metadata,
+        include_thread=include_thread,
+        max_context_chars=max_context_chars,
+        max_thread_comments=max_thread_comments,
+        system_prompt=system_prompt,
+        gh_token=e('GITHUB_TOKEN') or '',
+    )
+
     # Try CLI first, then API (unless dry-run)
     if (os.environ.get('CODEX_DRY_RUN', '').lower() in ('1','true','yes','on')):
-        reply_text = call_openai(prompt=prompt, model=model, openai_key=openai_key)
+        reply_text = call_openai(prompt=responses_input, model=model, openai_key=openai_key, system_for_chat=sys_for_chat, chat_user_content=chat_user_content)
     else:
-        reply_text = try_cli(prompt=prompt, model=model)
+        reply_text = try_cli(prompt=responses_input, model=model)
         if not reply_text:
-            reply_text = call_openai(prompt=prompt, model=model, openai_key=openai_key)
+            reply_text = call_openai(prompt=responses_input, model=model, openai_key=openai_key, system_for_chat=sys_for_chat, chat_user_content=chat_user_content)
 
     mention_prefix = f"@{commenter} " if mention and commenter else ""
     body_md = f"{mention_prefix}{reply_text}"
