@@ -13,7 +13,7 @@ CLI（`@openai/codex`）→ API のフォールバックに対応しています
 
 ## 使い方（呼び出し側）
 
-リポジトリ側に、コメントイベントで発火するワークフローを作成し、`uses: <owner>/<repo>@main` でシンプルに呼び出します（zudsniper/codex-action@main 風）。
+リポジトリ側に、コメントイベントで発火するワークフローを作成し、`uses: takashi-uchida/codex-github-actions@main` でシンプルに呼び出します（zudsniper/codex-action@main 風）。
 
 ```yaml
 # .github/workflows/on-comment.yml（呼び出し側リポジトリ）
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Codex action
-        uses: your-org/your-repo@main
+        uses: takashi-uchida/codex-github-actions@main
         with:
           trigger_prefix: ${{ vars.CODEX_TRIGGER || '/codex' }}
           model:          ${{ vars.LLM_MODEL     || 'o4-mini' }}
@@ -73,7 +73,7 @@ OpenHands風に `workflow_call` を使いたい場合は、次の書式も利用
 ```yaml
 jobs:
   resolve:
-    uses: your-org/your-repo/.github/workflows/codex-resolver.yml@main
+    uses: takashi-uchida/codex-github-actions/.github/workflows/codex-resolver.yml@main
     with:
       trigger_prefix: ${{ vars.CODEX_TRIGGER || '/codex' }}
       model:          ${{ vars.LLM_MODEL     || 'o4-mini' }}
