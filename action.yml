@@ -1,0 +1,39 @@
+name: Codex Replier
+description: "Reply to issue/PR comments starting with a trigger by calling OpenAI and posting a mention reply"
+
+inputs:
+  trigger_prefix:
+    description: "Prefix to trigger Codex (e.g. /codex)"
+    required: true
+  model:
+    description: "Model to use (e.g. o4-mini, gpt-4o-mini)"
+    required: true
+  mention_author:
+    description: "Whether to @mention the original commenter (true/false)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node (for CLI fallback)
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Run Codex replier
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
+        INPUT_TRIGGER_PREFIX: ${{ inputs.trigger_prefix }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_MENTION_AUTHOR: ${{ inputs.mention_author }}
+      run: |
+        set -euo pipefail
+        python "$GITHUB_ACTION_PATH/.github/actions/codex-replier/replier.py"
+

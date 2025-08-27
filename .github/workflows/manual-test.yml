@@ -1,0 +1,51 @@
+name: Manual Codex Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: Prompt after trigger prefix
+        type: string
+        default: "こんにちは、自己紹介して"
+      trigger_prefix:
+        description: Trigger prefix used by on-comment workflow
+        type: string
+        default: "/codex"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create_comment:
+    name: Create issue and comment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create test issue
+        id: issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Codex Test Issue',
+              body: 'This issue was created by Manual Codex Test workflow.'
+            });
+            core.setOutput('number', issue.number.toString());
+
+      - name: Post trigger comment
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+          BODY: ${{ github.event.inputs.trigger_prefix }} ${{ github.event.inputs.query }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: process.env.BODY,
+            });
+            core.notice(`Posted comment: ${process.env.BODY}`)
+

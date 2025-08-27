@@ -1,0 +1,40 @@
+name: Codex Resolver
+
+on:
+  workflow_call:
+    inputs:
+      trigger_prefix:
+        description: Prefix to trigger Codex (e.g. /codex)
+        required: true
+        type: string
+      model:
+        description: Model to use (e.g. o4-mini, gpt-4.1)
+        required: true
+        type: string
+      mention_author:
+        description: Whether to @mention the original commenter
+        required: true
+        type: boolean
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  codex:
+    name: Handle comment with Codex
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Run replier
+        uses: ./.github/actions/codex-replier
+        with:
+          trigger_prefix: ${{ inputs.trigger_prefix }}
+          model: ${{ inputs.model }}
+          mention_author: ${{ inputs.mention_author }}
+

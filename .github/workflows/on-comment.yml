@@ -1,0 +1,24 @@
+name: On Comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  resolve:
+    name: Resolve with Codex
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Run replier (root action)
+        uses: ./
+        with:
+          trigger_prefix: ${{ vars.CODEX_TRIGGER || '/codex' }}
+          model:          ${{ vars.LLM_MODEL     || 'o4-mini' }}
+          mention_author: ${{ vars.MENTION_AUTHOR || 'true' }}

@@ -1,0 +1,16 @@
+{
+  "action": "created",
+  "comment": {
+    "body": "/codex こんにちは、自己紹介して",
+    "user": { "login": "alice" }
+  },
+  "issue": {
+    "number": 1
+  },
+  "repository": {
+    "full_name": "example/example-repo",
+    "name": "example-repo",
+    "owner": { "login": "example" }
+  }
+}
+
