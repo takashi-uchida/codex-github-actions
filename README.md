@@ -24,6 +24,10 @@ on:
 
 jobs:
   resolve:
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - name: Run Codex action
@@ -55,7 +59,11 @@ jobs:
 
 ### CLI フォールバックのテンプレート（任意）
 
-- 既定の実行コマンドは `npx -y @openai/codex@latest -- --model {model} --input {prompt}` を試行します（npx に解釈させないため `--` を付与）。
+- 既定の実行コマンドは以下の順で試行します（`--` により npx に解釈させない）。
+  1. `npx -y @openai/codex@latest -- --model {model} {prompt}`
+  2. `npx -y @openai/codex@latest -- -m {model} {prompt}`
+  3. `npx -y @openai/codex@latest -- --model={model} {prompt}`
+  4. `npx -y @openai/codex@latest -- {prompt}`（モデル未指定・CLIデフォルト使用）
 - カスタムしたい場合は、環境変数 `CODEX_CLI_TEMPLATE` を設定してください（ジョブ全体の `env:` やリポジトリ変数でOK）。
 - テンプレート内で `{model}` と `{prompt}` が置換されます。例:
 

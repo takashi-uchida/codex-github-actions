@@ -81,43 +81,51 @@ def shquote(s: str) -> str:
 
 
 def try_cli(prompt: str, model: str) -> Optional[str]:
-    # Allow override: CODEX_CLI_TEMPLATE supports {model} and {prompt}
-    template = os.environ.get(
-        'CODEX_CLI_TEMPLATE',
-        # Use `--` to ensure args are passed to the package, not npx
-        "npx -y @openai/codex@latest -- --model {model} --input {prompt}",
-    )
-    if not template:
-        return None
-    cmd = template.replace('{model}', shquote(model)).replace('{prompt}', shquote(prompt))
+    # Allow explicit override via CODEX_CLI_TEMPLATE
+    override = os.environ.get('CODEX_CLI_TEMPLATE')
+    templates = []
+    if override:
+        templates.append(override)
+    else:
+        # Try several common patterns; prompt is positional
+        templates = [
+            "npx -y @openai/codex@latest -- --model {model} {prompt}",
+            "npx -y @openai/codex@latest -- -m {model} {prompt}",
+            "npx -y @openai/codex@latest -- --model={model} {prompt}",
+            # As a last resort, let default model be used
+            "npx -y @openai/codex@latest -- {prompt}",
+        ]
+
     env = os.environ.copy()
-    # OPENAI_API_KEY should already be present for the CLI
-    print(f"::group::Trying CLI: {template}")
-    try:
-        completed = subprocess.run(
-            ["bash", "-lc", cmd],
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=180,
-        )
-    except Exception as exc:
+    for tmpl in templates:
+        cmd = tmpl.replace('{model}', shquote(model)).replace('{prompt}', shquote(prompt))
+        print(f"::group::Trying CLI: {tmpl}")
+        try:
+            completed = subprocess.run(
+                ["bash", "-lc", cmd],
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=180,
+            )
+        except Exception as exc:
+            print("::endgroup::")
+            print(f"::notice title=Codex Replier::CLI attempt failed: {exc}")
+            continue
+
+        stdout = (completed.stdout or "").strip()
+        stderr = (completed.stderr or "").strip()
+        if completed.returncode != 0:
+            print("::endgroup::")
+            print(f"::notice title=Codex Replier::CLI exited with {completed.returncode}: {stderr[:400]}")
+            continue
         print("::endgroup::")
-        print(f"::notice title=Codex Replier::CLI attempt failed: {exc}")
-        return None
-    finally:
-        pass
-    stdout = (completed.stdout or "").strip()
-    stderr = (completed.stderr or "").strip()
-    if completed.returncode != 0:
-        print("::endgroup::")
-        print(f"::notice title=Codex Replier::CLI exited with {completed.returncode}: {stderr[:400]}\nFalling back to API.")
-        return None
-    print("::endgroup::")
-    if not stdout:
-        print("::notice title=Codex Replier::CLI produced no output; falling back to API")
-        return None
-    return stdout
+        if not stdout:
+            print("::notice title=Codex Replier::CLI produced no output; trying next pattern")
+            continue
+        return stdout
+    print("::notice title=Codex Replier::All CLI patterns failed; falling back to API")
+    return None
 
 
 def post_comment(owner: str, repo_name: str, number: int, body_md: str, gh_token: str):
@@ -144,7 +152,7 @@ def post_comment(owner: str, repo_name: str, number: int, body_md: str, gh_token
             _ = resp.read()
     except Exception as exc:
         print("::endgroup::")
-        print(f"::error title=Codex Replier::Failed to post comment: {exc}")
+        print(f"::error title=Codex Replier::Failed to post comment: {exc}\nIf this is HTTP 403, ensure the caller workflow has permissions: issues: write and pull-requests: write.")
         sys.exit(1)
     print("::endgroup::")
     print("::notice title=Codex Replier::Reply posted successfully")
