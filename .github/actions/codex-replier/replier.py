@@ -30,6 +30,19 @@ def extract_reply_text(resp_json: dict) -> str:
     reply_text = resp_json.get('output_text')
     if reply_text:
         return reply_text
+    # Some SDKs wrap under 'response'
+    wrapped = resp_json.get('response') or {}
+    if isinstance(wrapped, dict):
+        if wrapped.get('output_text'):
+            return wrapped['output_text']
+        # message-like output under response.output
+        wout = wrapped.get('output') or []
+        if isinstance(wout, list) and wout:
+            content = (wout[0] or {}).get('content') or []
+            if isinstance(content, list):
+                for c in content:
+                    if c.get('type') == 'output_text' and c.get('text'):
+                        return c['text']
     # Fallback to chat shape
     choices = resp_json.get('choices') or []
     if choices:
@@ -68,6 +81,15 @@ def call_openai(prompt: str, model: str, openai_key: str) -> str:
         with urllib.request.urlopen(req, timeout=120) as resp:
             body = resp.read().decode('utf-8', errors='replace')
             resp_json = json.loads(body)
+    except urllib.error.HTTPError as http_err:
+        # Surface HTTP error body for easier debugging
+        try:
+            err_body = http_err.read().decode('utf-8', errors='replace')
+        except Exception:
+            err_body = str(http_err)
+        print("::endgroup::")
+        print(f"::error title=Codex Replier::OpenAI /v1/responses failed {http_err.code}: {err_body[:800]}")
+        sys.exit(1)
     except Exception as exc:
         print("::endgroup::")
         print(f"::error title=Codex Replier::OpenAI call failed: {exc}")
@@ -81,9 +103,16 @@ def call_openai(prompt: str, model: str, openai_key: str) -> str:
     text = extract_reply_text(resp_json)
     if text and text.strip() and text.strip() != "(No text response received from the model.)":
         return text
+    # Decide chat fallback model. Some models (e.g., o*-family) are Responses-only.
+    disable_chat_fb = (os.environ.get('CODEX_DISABLE_CHAT_FALLBACK','').lower() in ('1','true','yes','on'))
+    fb_model = os.environ.get('CODEX_CHAT_FALLBACK_MODEL', 'gpt-4o-mini')
+    # If requested model looks like o*-family, prefer switching to fallback chat model
+    chat_model = fb_model if any(model.startswith(prefix) for prefix in ("o1","o2","o3","o4")) else model
+    if disable_chat_fb:
+        return "(No text response received from the model.)"
     # Fallback: try Chat Completions for broader compatibility
     chat_payload = {
-        "model": model,
+        "model": chat_model,
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -104,6 +133,14 @@ def call_openai(prompt: str, model: str, openai_key: str) -> str:
         with urllib.request.urlopen(chat_req, timeout=120) as resp:
             body = resp.read().decode('utf-8', errors='replace')
             chat_json = json.loads(body)
+    except urllib.error.HTTPError as http_err:
+        try:
+            err_body = http_err.read().decode('utf-8', errors='replace')
+        except Exception:
+            err_body = str(http_err)
+        print("::endgroup::")
+        print(f"::notice title=Codex Replier::Chat fallback failed {http_err.code}: {err_body[:800]}")
+        return f"(OpenAI error) chat fallback {http_err.code}: {err_body[:200]}"
     except Exception as exc:
         print("::endgroup::")
         print(f"::notice title=Codex Replier::Chat fallback failed: {exc}")
@@ -132,15 +169,11 @@ def try_cli(prompt: str, model: str) -> Optional[str]:
     if override:
         templates.append(override)
     else:
-        # Try several common patterns; prompt is positional
+        # Use conservative patterns. Current @openai/codex does not accept a --model flag.
         templates = [
-            # Prefer piping prompt via stdin to avoid TTY-related errors
-            "printf %s {prompt} | npx -y @openai/codex@latest -- --model {model}",
-            "printf %s {prompt} | npx -y @openai/codex@latest -- -m {model}",
-            # Positional prompt as fallback
-            "npx -y @openai/codex@latest -- --model {model} {prompt}",
-            "npx -y @openai/codex@latest -- -m {model} {prompt}",
-            # As a last resort, let default model be used
+            # Pipe prompt on stdin; rely on CLI default model.
+            "printf %s {prompt} | npx -y @openai/codex@latest --",
+            # Positional prompt as fallback.
             "npx -y @openai/codex@latest -- {prompt}",
         ]
 
@@ -198,6 +231,14 @@ def post_comment(owner: str, repo_name: str, number: int, body_md: str, gh_token
     try:
         with urllib.request.urlopen(post_req, timeout=60) as resp:
             _ = resp.read()
+    except urllib.error.HTTPError as http_err:
+        try:
+            err_body = http_err.read().decode('utf-8', errors='replace')
+        except Exception:
+            err_body = str(http_err)
+        print("::endgroup::")
+        print(f"::error title=Codex Replier::Failed to post comment ({http_err.code}): {err_body[:800]}\nIf this is 403, ensure the workflow/job grants: contents: read, issues: write, pull-requests: write. Also avoid fork-origin events with restricted tokens when testing.")
+        sys.exit(1)
     except Exception as exc:
         print("::endgroup::")
         print(f"::error title=Codex Replier::Failed to post comment: {exc}\nIf this is HTTP 403, ensure the caller workflow has permissions: issues: write and pull-requests: write.")

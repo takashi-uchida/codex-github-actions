@@ -59,23 +59,28 @@ jobs:
 
 ### CLI フォールバックのテンプレート（任意）
 
-- 既定の実行コマンドは以下の順で試行します（`--` により npx に解釈させない）。
-  1. `printf %s {prompt} | npx -y @openai/codex@latest -- --model {model}`
-  2. `printf %s {prompt} | npx -y @openai/codex@latest -- -m {model}`
-  3. `npx -y @openai/codex@latest -- --model {model} {prompt}`
-  4. `npx -y @openai/codex@latest -- -m {model} {prompt}`
-  5. `npx -y @openai/codex@latest -- {prompt}`（モデル未指定・CLIデフォルト使用）
+- 既定の実行コマンドは以下の順で試行します（`--` は npx のオプション終端）。現行の `@openai/codex` は `--model/-m` を受け付けないため、モデル指定は行いません（CLI 既定モデルを使用）。
+  1. `printf %s {prompt} | npx -y @openai/codex@latest --`
+  2. `npx -y @openai/codex@latest -- {prompt}`
 
 - CLIを無効化したい場合は `CODEX_CLI_DISABLE=true` を設定してください（API直呼びのみ）。
 - カスタムしたい場合は、環境変数 `CODEX_CLI_TEMPLATE` を設定してください（ジョブ全体の `env:` やリポジトリ変数でOK）。
-- テンプレート内で `{model}` と `{prompt}` が置換されます。例:
+- テンプレート内で `{prompt}`（および互換のため `{model}`）が置換されます。例:
 
 ```yaml
 env:
-  CODEX_CLI_TEMPLATE: "npx -y @openai/codex@latest -- --no-color --model {model} --input {prompt}"
+  CODEX_CLI_TEMPLATE: "printf %s {prompt} | npx -y @openai/codex@latest -- --no-color"
 ```
 
-CLI が失敗（非ゼロ終了・出力なし）の場合は自動で API にフォールバックします。
+CLI が失敗（非ゼロ終了・出力なし）の場合は自動で API にフォールバックします。モデル指定が必要な場合は、CLI を無効化して API 側で指定してください。
+
+### API フォールバックとモデル
+
+- 既定では `Responses API (/v1/responses)` に投げ、テキスト抽出に失敗した場合のみ Chat Completions にフォールバックします。
+- `o*` 系（例: `o4-mini`）は Responses 専用のため、Chat フォールバック時は既定で `gpt-4o-mini` に切り替えます。
+- 必要に応じて環境変数で調整できます。
+  - `CODEX_CHAT_FALLBACK_MODEL`: Chat フォールバック時のモデル（既定: `gpt-4o-mini`）
+  - `CODEX_DISABLE_CHAT_FALLBACK`: `true` で Chat フォールバックを無効化
 
 ## 代替: 再利用可能ワークフロー（OpenHands風）
 
